@@ -6,17 +6,12 @@ set -Eeuo pipefail
 
 CONTAINER_NAME="${CONTAINER_NAME:-OpenClaw}"
 IMAGE="${IMAGE:-ghcr.io/openclaw/openclaw:latest}"
-BROWSER_CONTAINER_NAME="${BROWSER_CONTAINER_NAME:-OpenClawBrowserless}"
-BROWSER_IMAGE="${BROWSER_IMAGE:-ghcr.io/browserless/chromium:latest}"
-BROWSER_NETWORK="${BROWSER_NETWORK:-openclaw-browser-net}"
-BROWSER_SUBNET="${BROWSER_SUBNET:-172.28.238.0/24}"
-BROWSER_IP="${BROWSER_IP:-172.28.238.10}"
-BROWSER_CDP_URL="${BROWSER_CDP_URL:-ws://${BROWSER_IP}:3000}"
 APPDATA_ROOT="${APPDATA_ROOT:-/mnt/cache/appdata/openclaw}"
 HOST_PORT="${HOST_PORT:-18789}"
 MODEL_ID="${MODEL_ID:-gpt-5.5}"
 MODEL_REF="${MODEL_REF:-openai-codex/${MODEL_ID}}"
 PLUGIN_STAGE_DIR="${PLUGIN_STAGE_DIR:-/tmp/openclaw-plugin-stage}"
+BROWSER_EXECUTABLE_PATH="${BROWSER_EXECUTABLE_PATH:-/root/.openclaw/ms-playwright/chromium-1217/chrome-linux64/chrome}"
 BACKUP_DIR="${BACKUP_DIR:-/boot/config/plugins/dockerMan/templates-user}"
 
 die() {
@@ -212,16 +207,19 @@ if [ ! -s "$CONFIG_FILE" ]; then
   },
   "browser": {
     "enabled": true,
-    "defaultProfile": "browserless",
+    "defaultProfile": "openclaw",
     "headless": true,
+    "noSandbox": true,
+    "executablePath": "${BROWSER_EXECUTABLE_PATH}",
+    "cdpPortRangeStart": 18800,
     "remoteCdpTimeoutMs": 3000,
     "remoteCdpHandshakeTimeoutMs": 6000,
     "snapshotDefaults": {
       "mode": "efficient"
     },
     "profiles": {
-      "browserless": {
-        "cdpUrl": "${BROWSER_CDP_URL}",
+      "openclaw": {
+        "cdpPort": 18800,
         "color": "#00AA00"
       }
     }
@@ -239,7 +237,7 @@ log "Applying OpenClaw config optimizations"
 stamp="$(date +%Y%m%d-%H%M%S)"
 cp "$CONFIG_FILE" "${CONFIG_FILE}.bak-onebutton-${stamp}"
 
-jq --arg model_id "$MODEL_ID" --arg model_ref "$MODEL_REF" --arg browser_cdp_url "$BROWSER_CDP_URL" '
+jq --arg model_ref "$MODEL_REF" --arg browser_executable_path "$BROWSER_EXECUTABLE_PATH" '
   .agents = (.agents // {})
   | .agents.defaults = (.agents.defaults // {})
   | .agents.defaults.model = (.agents.defaults.model // {})
@@ -297,16 +295,21 @@ jq --arg model_id "$MODEL_ID" --arg model_ref "$MODEL_REF" --arg browser_cdp_url
     ]) | unique)
   | .browser = (.browser // {})
   | .browser.enabled = true
-  | .browser.defaultProfile = "browserless"
+  | .browser.defaultProfile = "openclaw"
   | .browser.headless = true
+  | .browser.noSandbox = true
+  | .browser.executablePath = $browser_executable_path
+  | .browser.cdpPortRangeStart = 18800
   | .browser.remoteCdpTimeoutMs = 3000
   | .browser.remoteCdpHandshakeTimeoutMs = 6000
   | .browser.snapshotDefaults = ((.browser.snapshotDefaults // {}) | .mode = "efficient")
-  | .browser.profiles = (.browser.profiles // {})
-  | .browser.profiles.browserless = {
-      "cdpUrl": $browser_cdp_url,
-      "color": "#00AA00"
+  | .browser.profiles = {
+      "openclaw": {
+        "cdpPort": 18800,
+        "color": "#00AA00"
+      }
     }
+  | .browser |= del(.ssrfPolicy)
   | .tools = (.tools // {})
   | .tools.alsoAllow = (((.tools.alsoAllow // []) + ["browser"]) | unique)
   | .skills = (.skills // {})
@@ -325,9 +328,6 @@ mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
 log "Pulling ${IMAGE}"
 docker pull "$IMAGE"
 
-log "Pulling ${BROWSER_IMAGE}"
-docker pull "$BROWSER_IMAGE"
-
 log "Validating config"
 docker run --rm --entrypoint openclaw --user root --hostname "$CONTAINER_NAME" \
   -e "OPENCLAW_PLUGIN_STAGE_DIR=${PLUGIN_STAGE_DIR}" \
@@ -339,28 +339,6 @@ docker run --rm --entrypoint openclaw --user root --hostname "$CONTAINER_NAME" \
   config validate
 
 mkdir -p "$BACKUP_DIR"
-
-log "Creating Docker network ${BROWSER_NETWORK}"
-if ! docker network inspect "$BROWSER_NETWORK" >/dev/null 2>&1; then
-  docker network create --subnet "$BROWSER_SUBNET" "$BROWSER_NETWORK"
-fi
-
-log "Replacing browser sidecar ${BROWSER_CONTAINER_NAME}"
-if docker inspect "$BROWSER_CONTAINER_NAME" >/dev/null 2>&1; then
-  docker inspect "$BROWSER_CONTAINER_NAME" > "${BACKUP_DIR}/my-${BROWSER_CONTAINER_NAME}.inspect-${stamp}.json" || true
-  docker rm -f "$BROWSER_CONTAINER_NAME"
-fi
-
-docker run -d \
-  --name "$BROWSER_CONTAINER_NAME" \
-  --restart unless-stopped \
-  --network "$BROWSER_NETWORK" \
-  --ip "$BROWSER_IP" \
-  -e "EXTERNAL=${BROWSER_CDP_URL}" \
-  -e "CONCURRENT=2" \
-  -e "QUEUED=5" \
-  -e "TIMEOUT=300000" \
-  "$BROWSER_IMAGE"
 
 log "Replacing Docker container ${CONTAINER_NAME}"
 if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
@@ -388,8 +366,6 @@ docker run -d \
   "$IMAGE" \
   sh -c "mkdir -p /root/.openclaw /home/linuxbrew ${PLUGIN_STAGE_DIR}; exec node dist/index.js gateway --bind lan"
 
-docker network connect "$BROWSER_NETWORK" "$CONTAINER_NAME" >/dev/null 2>&1 || true
-
 log "Waiting for health"
 for i in $(seq 1 36); do
   status="$(docker inspect "$CONTAINER_NAME" --format '{{.State.Status}}' 2>/dev/null || true)"
@@ -403,10 +379,11 @@ done
 
 log "Final status"
 docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-docker ps --filter "name=${BROWSER_CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
-docker network inspect "$BROWSER_NETWORK" --format '{{range .Containers}}{{println .Name .IPv4Address}}{{end}}'
 docker inspect "$CONTAINER_NAME" --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
 docker stats "$CONTAINER_NAME" --no-stream --format '{{.Name}} CPU={{.CPUPerc}} MEM={{.MemUsage}} PIDS={{.PIDs}}'
+
+log "Browser check"
+docker exec "$CONTAINER_NAME" openclaw browser status || true
 
 cat <<EOF
 
@@ -418,8 +395,9 @@ Next steps:
      docker exec -it ${CONTAINER_NAME} openclaw models set ${MODEL_REF}
   4. Check:
      docker exec -it ${CONTAINER_NAME} openclaw models status --plain
-  5. Check browser sidecar:
-     docker exec ${CONTAINER_NAME} node -e "fetch('http://${BROWSER_IP}:3000/json/version').then(r=>r.json()).then(j=>console.log(j.Browser, j.webSocketDebuggerUrl))"
+  5. Check browser:
+     docker exec ${CONTAINER_NAME} openclaw browser status
+     docker exec ${CONTAINER_NAME} openclaw browser open https://example.com
 
 If using Cloudflare Tunnel, point it to:
   http://<UNRAID_IP>:${HOST_PORT}

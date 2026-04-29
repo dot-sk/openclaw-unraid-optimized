@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>OpenClaw</Name>
+  <Repository>ghcr.io/openclaw/openclaw:latest</Repository>
+  <Registry>https://github.com/openclaw/openclaw/pkgs/container/openclaw</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/openclaw/openclaw</Support>
+  <Project>https://github.com/openclaw/openclaw</Project>
+  <Overview>OpenClaw optimized Unraid template.
+
+This template intentionally uses /mnt/cache appdata paths instead of /mnt/user to avoid Unraid shfs/FUSE latency for Node, SQLite, and plugin runtime dependency staging.
+
+Recommended follow-up: run the companion one-button setup script to apply OpenClaw config optimizations, validate openclaw.json, disable heavy/default-unused plugins, and seed zero-cost pricing for openai-codex subscription models.</Overview>
+  <Category>Productivity: Tools:Utilities AI:</Category>
+  <WebUI>http://[IP]:[PORT:18789]/</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/selfhosters/unRAID-CA-templates/master/templates/img/openclaw.png</Icon>
+  <ExtraParams>--user root --hostname OpenClaw</ExtraParams>
+  <PostArgs>sh -c "mkdir -p /root/.openclaw /home/linuxbrew /tmp/openclaw-plugin-stage; [ -s /root/.openclaw/openclaw.json ] || echo '{\"gateway\":{\"mode\":\"local\",\"bind\":\"lan\",\"controlUi\":{\"allowInsecureAuth\":true},\"auth\":{\"mode\":\"token\"}},\"agents\":{\"defaults\":{\"model\":{\"primary\":\"openai/gpt-5.5\"},\"memorySearch\":{\"provider\":\"openai\",\"model\":\"text-embedding-3-small\",\"enabled\":false}}}}' &amp;gt; /root/.openclaw/openclaw.json; exec node dist/index.js gateway --bind lan"</PostArgs>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Control UI Port" Target="18789" Default="18789" Mode="tcp" Description="Port for Control UI and Gateway API." Type="Port" Display="always" Required="true" Mask="false">18789</Config>
+  <Config Name="Config Path" Target="/root/.openclaw" Default="/mnt/cache/appdata/openclaw/config" Mode="rw" Description="OpenClaw config, credentials, sessions, and runtime state. Use /mnt/cache, not /mnt/user." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/openclaw/config</Config>
+  <Config Name="Workspace Path" Target="/home/node/clawd" Default="/mnt/cache/appdata/openclaw/workspace" Mode="rw" Description="Agent workspace. Use /mnt/cache, not /mnt/user." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/openclaw/workspace</Config>
+  <Config Name="Projects Path" Target="/projects" Default="/mnt/cache/appdata/openclaw/projects" Mode="rw" Description="Optional additional path for coding projects. Use /mnt/cache, not /mnt/user." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/cache/appdata/openclaw/projects</Config>
+  <Config Name="Homebrew Path" Target="/home/linuxbrew/.linuxbrew" Default="/mnt/cache/appdata/openclaw/homebrew" Mode="rw" Description="Persistent storage for optional Homebrew packages. Use /mnt/cache, not /mnt/user." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/cache/appdata/openclaw/homebrew</Config>
+  <Config Name="Gateway Token" Target="OPENCLAW_GATEWAY_TOKEN" Default="" Mode="" Description="Secret token for Control UI authentication. Generate with: openssl rand -hex 24" Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="OpenAI API Key" Target="OPENAI_API_KEY" Default="" Mode="" Description="Optional. Needed for OpenAI embeddings/API features. Codex subscription auth is configured separately via openai-codex OAuth." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Telegram Bot Token" Target="TELEGRAM_BOT_TOKEN" Default="" Mode="" Description="Optional Telegram bot token from BotFather." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Gateway Port" Target="OPENCLAW_GATEWAY_PORT" Default="18789" Mode="" Description="Internal gateway port. Keep in sync with Control UI Port." Type="Variable" Display="advanced" Required="false" Mask="false">18789</Config>
+  <Config Name="Plugin Stage Dir" Target="OPENCLAW_PLUGIN_STAGE_DIR" Default="/tmp/openclaw-plugin-stage" Mode="" Description="Writable non-shfs directory for bundled plugin runtime dependencies. Required to avoid Unraid shfs/FUSE startup hangs." Type="Variable" Display="advanced" Required="false" Mask="false">/tmp/openclaw-plugin-stage</Config>
+  <Config Name="PATH" Target="PATH" Default="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" Mode="" Description="System PATH including optional Homebrew." Type="Variable" Display="advanced" Required="false" Mask="false">/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin</Config>
+</Container>

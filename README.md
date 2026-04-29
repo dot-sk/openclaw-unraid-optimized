@@ -1,0 +1,229 @@
+# OpenClaw for Unraid
+
+This is a simple Unraid setup for running OpenClaw in Docker.
+
+It is meant for people who want OpenClaw to run reliably on Unraid, especially when using it through a reverse proxy or Cloudflare Tunnel.
+
+This repo does not include any secrets, tokens, API keys, OAuth sessions, or personal OpenClaw data.
+
+## What This Fixes
+
+The default OpenClaw setup can work, but on Unraid it may feel slow or unreliable.
+
+Common problems:
+
+- OpenClaw appdata is mounted through `/mnt/user`, which uses Unraid `shfs`.
+- Plugin dependencies are staged inside appdata.
+- Too many plugins are enabled by default.
+- OpenClaw may wait on external pricing data from LiteLLM or OpenRouter.
+
+This setup makes a few practical changes:
+
+- Uses `/mnt/cache/appdata/openclaw/...` instead of `/mnt/user/...`.
+- Stages plugin runtime files in `/tmp/openclaw-plugin-stage`.
+- Keeps only a small useful plugin set enabled.
+- Uses `openai/gpt-5.5` as the default model.
+- Adds local zero-cost pricing for `openai-codex`, so OpenClaw does not need to fetch pricing data for Codex subscription usage.
+
+## Quick Install
+
+Run this on your Unraid server as `root`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dot-sk/openclaw-unraid-optimized/main/install.sh | bash
+```
+
+This installs:
+
+- an Unraid Docker template;
+- a User Script called `OpenClaw Optimized Setup`.
+
+Then open Unraid:
+
+```text
+Plugins -> User Scripts -> OpenClaw Optimized Setup -> Run Script
+```
+
+If you want to install and run everything immediately:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dot-sk/openclaw-unraid-optimized/main/install.sh | RUN_NOW=1 bash
+```
+
+## What the Script Does
+
+The setup script:
+
+- creates OpenClaw folders under `/mnt/cache/appdata/openclaw`;
+- creates a minimal `openclaw.json` if one does not exist;
+- applies the optimized plugin list;
+- sets `OPENCLAW_PLUGIN_STAGE_DIR=/tmp/openclaw-plugin-stage`;
+- adds local pricing data for `openai-codex`;
+- runs `openclaw config validate`;
+- recreates the `OpenClaw` Docker container;
+- sets restart policy to `unless-stopped`;
+- waits until the container is healthy.
+
+The script does not delete your appdata.
+
+If the container already exists, the script recreates the container, but keeps the data in `/mnt/cache/appdata/openclaw`.
+
+## Docker Volumes
+
+Use `/mnt/cache`, not `/mnt/user`.
+
+Recommended mounts:
+
+```text
+/mnt/cache/appdata/openclaw/config    -> /root/.openclaw
+/mnt/cache/appdata/openclaw/workspace -> /home/node/clawd
+/mnt/cache/appdata/openclaw/projects  -> /projects
+/mnt/cache/appdata/openclaw/homebrew  -> /home/linuxbrew/.linuxbrew
+```
+
+Why this matters:
+
+`/mnt/user` goes through Unraid `shfs`. That can be slow for Node, SQLite, and many small files. OpenClaw does all of those things during startup.
+
+## Codex Subscription Login
+
+After the container is running, log in to Codex:
+
+```bash
+docker exec -it OpenClaw openclaw models auth login --provider openai-codex
+docker exec -it OpenClaw openclaw models set openai/gpt-5.5
+docker exec -it OpenClaw openclaw models status --plain
+```
+
+Current OpenClaw docs use this model ref:
+
+```text
+openai/...
+```
+
+The important part is the auth provider:
+
+```text
+openai-codex
+```
+
+`openai-codex/...` may still work as a legacy alias, but new OpenClaw configs should use `openai/...` after logging in with `openai-codex`.
+
+Do not set up the normal `openai` API-key provider if your goal is to use ChatGPT/Codex subscription access for chat.
+
+## OpenAI API Key
+
+You do not need a normal OpenAI API key for Codex subscription login.
+
+You do need a normal OpenAI API key if you want OpenAI embeddings.
+
+That is separate from Codex subscription auth.
+
+For embeddings, use:
+
+```text
+text-embedding-3-small
+```
+
+This is used for memory/search features, not for the main chat model.
+
+To provide the API key:
+
+```bash
+OPENAI_API_KEY=sk-... bash scripts/openclaw-unraid-onebutton.sh
+```
+
+Do not commit API keys to GitHub.
+
+By default this setup keeps memory indexing disabled. That avoids unexpected API usage. You can enable it later if you want OpenClaw memory/search.
+
+## Enabled Plugins
+
+By default this setup keeps only a small useful set:
+
+```text
+device-pair
+document-extract
+openai
+telegram
+web-readability
+```
+
+Heavy or unused default plugins are disabled.
+
+You can enable more later from the OpenClaw UI or by editing `openclaw.json`.
+
+## Check That It Works
+
+Validate config:
+
+```bash
+docker exec OpenClaw openclaw config validate
+```
+
+Check the container:
+
+```bash
+docker ps --filter name=OpenClaw
+docker stats OpenClaw --no-stream
+```
+
+List enabled plugins:
+
+```bash
+docker exec OpenClaw openclaw plugins list --enabled
+```
+
+Show recent logs:
+
+```bash
+docker logs --tail 100 OpenClaw
+```
+
+## Cloudflare Tunnel
+
+If you use Cloudflare Tunnel, point it to:
+
+```text
+http://<UNRAID_IP>:18789
+```
+
+Example:
+
+```text
+http://192.168.86.80:18789
+```
+
+## Security Notes
+
+This setup follows the upstream OpenClaw Unraid template and runs the container as `root` inside Docker.
+
+The container is still limited:
+
+- it is not privileged;
+- it does not mount the Docker socket;
+- it does not mount the whole host filesystem;
+- it only gets the OpenClaw appdata, workspace, projects, and homebrew folders.
+
+Do not publish these files or folders:
+
+- OpenClaw credentials;
+- OAuth state;
+- Telegram bot tokens;
+- OpenAI API keys;
+- your real `openclaw.json` if it contains private data;
+- `agents`, `identity`, or `devices` from your live appdata.
+
+## Files
+
+```text
+install.sh
+scripts/openclaw-unraid-onebutton.sh
+templates/my-OpenClaw-Optimized.xml
+```
+
+`install.sh` installs the template and User Script on Unraid.
+
+`scripts/openclaw-unraid-onebutton.sh` does the full setup.
+
+`templates/my-OpenClaw-Optimized.xml` can be imported manually in the Unraid Docker UI.

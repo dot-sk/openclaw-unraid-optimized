@@ -22,6 +22,7 @@ This setup makes a few practical changes:
 - Stages plugin runtime files in `/tmp/openclaw-plugin-stage`.
 - Keeps only a small useful plugin set enabled.
 - Uses `openai-codex/gpt-5.5` as the default model.
+- Runs Chromium as a separate Browserless sidecar container for browser tools.
 
 ## Quick Install
 
@@ -55,15 +56,17 @@ The setup script:
 - creates OpenClaw folders under `/mnt/cache/appdata/openclaw`;
 - creates a minimal `openclaw.json` if one does not exist;
 - applies the optimized plugin list;
+- enables the OpenClaw browser tool through a Browserless sidecar;
+- creates a private Docker network for OpenClaw and Browserless;
 - sets `OPENCLAW_PLUGIN_STAGE_DIR=/tmp/openclaw-plugin-stage`;
 - runs `openclaw config validate`;
-- recreates the `OpenClaw` Docker container;
+- recreates the `OpenClaw` and `OpenClawBrowserless` Docker containers;
 - sets restart policy to `unless-stopped`;
-- waits until the container is healthy.
+- waits until OpenClaw is healthy.
 
 The script does not delete your appdata.
 
-If the container already exists, the script recreates the container, but keeps the data in `/mnt/cache/appdata/openclaw`.
+If the containers already exist, the script recreates them, but keeps the data in `/mnt/cache/appdata/openclaw`.
 
 ## Docker Volumes
 
@@ -142,11 +145,41 @@ document-extract
 openai
 telegram
 web-readability
+browser
 ```
 
 Heavy or unused default plugins are disabled.
 
 You can enable more later from the OpenClaw UI or by editing `openclaw.json`.
+
+## Browser Support
+
+Browser tools need a real Chromium runtime. The OpenClaw image is small and may not include all browser system libraries, so this setup runs Chromium in a separate sidecar container:
+
+```text
+OpenClawBrowserless
+```
+
+The script creates a private Docker network:
+
+```text
+openclaw-browser-net
+```
+
+Default addresses:
+
+```text
+OpenClaw            -> 172.28.238.2
+OpenClawBrowserless -> 172.28.238.10
+```
+
+OpenClaw connects to Browserless through:
+
+```text
+ws://172.28.238.10:3000
+```
+
+This is meant for the agent to read pages through a browser. For sites like LinkedIn or Glassdoor, you may still need to log in manually or pass CAPTCHA/2FA yourself. Do not expose Browserless directly to the public internet.
 
 ## Check That It Works
 
@@ -160,6 +193,7 @@ Check the container:
 
 ```bash
 docker ps --filter name=OpenClaw
+docker ps --filter name=OpenClawBrowserless
 docker stats OpenClaw --no-stream
 ```
 
@@ -173,6 +207,13 @@ Show recent logs:
 
 ```bash
 docker logs --tail 100 OpenClaw
+docker logs --tail 100 OpenClawBrowserless
+```
+
+Check that OpenClaw can reach Browserless:
+
+```bash
+docker exec OpenClaw node -e "fetch('http://172.28.238.10:3000/json/version').then(r=>r.json()).then(j=>console.log(j.Browser, j.webSocketDebuggerUrl))"
 ```
 
 ## Cloudflare Tunnel
@@ -199,6 +240,7 @@ The container is still limited:
 - it does not mount the Docker socket;
 - it does not mount the whole host filesystem;
 - it only gets the OpenClaw appdata, workspace, projects, and homebrew folders.
+- Browserless is kept on a private Docker network and should not be published without access control.
 
 Do not publish these files or folders:
 

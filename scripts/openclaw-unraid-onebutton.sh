@@ -6,6 +6,12 @@ set -Eeuo pipefail
 
 CONTAINER_NAME="${CONTAINER_NAME:-OpenClaw}"
 IMAGE="${IMAGE:-ghcr.io/openclaw/openclaw:latest}"
+BROWSER_CONTAINER_NAME="${BROWSER_CONTAINER_NAME:-OpenClawBrowserless}"
+BROWSER_IMAGE="${BROWSER_IMAGE:-ghcr.io/browserless/chromium:latest}"
+BROWSER_NETWORK="${BROWSER_NETWORK:-openclaw-browser-net}"
+BROWSER_SUBNET="${BROWSER_SUBNET:-172.28.238.0/24}"
+BROWSER_IP="${BROWSER_IP:-172.28.238.10}"
+BROWSER_CDP_URL="${BROWSER_CDP_URL:-ws://${BROWSER_IP}:3000}"
 APPDATA_ROOT="${APPDATA_ROOT:-/mnt/cache/appdata/openclaw}"
 HOST_PORT="${HOST_PORT:-18789}"
 MODEL_ID="${MODEL_ID:-gpt-5.5}"
@@ -86,8 +92,8 @@ if [ ! -s "$CONFIG_FILE" ]; then
       "openai": { "enabled": true },
       "telegram": { "enabled": true },
       "web-readability": { "enabled": true },
+      "browser": { "enabled": true },
       "memory-core": { "enabled": false },
-      "browser": { "enabled": false },
       "acpx": { "enabled": false },
       "bonjour": { "enabled": false },
       "phone-control": { "enabled": false },
@@ -106,7 +112,6 @@ if [ ! -s "$CONFIG_FILE" ]; then
       "bluebubbles",
       "bonjour",
       "brave",
-      "browser",
       "byteplus",
       "cerebras",
       "chutes",
@@ -204,6 +209,27 @@ if [ ! -s "$CONFIG_FILE" ]; then
       "zalo",
       "zalouser"
     ]
+  },
+  "browser": {
+    "enabled": true,
+    "defaultProfile": "browserless",
+    "headless": true,
+    "remoteCdpTimeoutMs": 3000,
+    "remoteCdpHandshakeTimeoutMs": 6000,
+    "snapshotDefaults": {
+      "mode": "efficient"
+    },
+    "profiles": {
+      "browserless": {
+        "cdpUrl": "${BROWSER_CDP_URL}",
+        "color": "#00AA00"
+      }
+    }
+  },
+  "tools": {
+    "alsoAllow": [
+      "browser"
+    ]
   }
 }
 JSON
@@ -213,7 +239,7 @@ log "Applying OpenClaw config optimizations"
 stamp="$(date +%Y%m%d-%H%M%S)"
 cp "$CONFIG_FILE" "${CONFIG_FILE}.bak-onebutton-${stamp}"
 
-jq --arg model_id "$MODEL_ID" --arg model_ref "$MODEL_REF" '
+jq --arg model_id "$MODEL_ID" --arg model_ref "$MODEL_REF" --arg browser_cdp_url "$BROWSER_CDP_URL" '
   .agents = (.agents // {})
   | .agents.defaults = (.agents.defaults // {})
   | .agents.defaults.model = (.agents.defaults.model // {})
@@ -231,8 +257,8 @@ jq --arg model_id "$MODEL_ID" --arg model_ref "$MODEL_REF" '
   | .plugins.entries.openai.enabled = true
   | .plugins.entries.telegram.enabled = true
   | .plugins.entries."web-readability".enabled = true
+  | .plugins.entries.browser.enabled = true
   | .plugins.entries."memory-core".enabled = false
-  | .plugins.entries.browser.enabled = false
   | .plugins.entries.acpx.enabled = false
   | .plugins.entries.bonjour.enabled = false
   | .plugins.entries."phone-control".enabled = false
@@ -241,7 +267,7 @@ jq --arg model_id "$MODEL_ID" --arg model_ref "$MODEL_REF" '
       ((.plugins.deny // []) + [
         "acpx","active-memory","alibaba","amazon-bedrock","amazon-bedrock-mantle",
         "anthropic","anthropic-vertex","arcee","azure-speech","bluebubbles",
-        "bonjour","brave","browser","byteplus","cerebras","chutes",
+        "bonjour","brave","byteplus","cerebras","chutes",
         "cloudflare-ai-gateway","codex","comfy","copilot-proxy","deepgram",
         "deepseek","diagnostics-otel","diagnostics-prometheus","diffs","discord",
         "duckduckgo","elevenlabs","exa","fal","feishu","firecrawl","fireworks",
@@ -259,7 +285,30 @@ jq --arg model_id "$MODEL_ID" --arg model_ref "$MODEL_REF" '
         "vllm","voice-call","volcengine","voyage","vydra","webhooks","whatsapp",
         "xai","xiaomi","zai","zalo","zalouser"
       ]) | unique
+      | map(select(. != "browser"))
     )
+  | .plugins.allow = (((.plugins.allow // []) + [
+      "browser",
+      "device-pair",
+      "document-extract",
+      "openai",
+      "telegram",
+      "web-readability"
+    ]) | unique)
+  | .browser = (.browser // {})
+  | .browser.enabled = true
+  | .browser.defaultProfile = "browserless"
+  | .browser.headless = true
+  | .browser.remoteCdpTimeoutMs = 3000
+  | .browser.remoteCdpHandshakeTimeoutMs = 6000
+  | .browser.snapshotDefaults = ((.browser.snapshotDefaults // {}) | .mode = "efficient")
+  | .browser.profiles = (.browser.profiles // {})
+  | .browser.profiles.browserless = {
+      "cdpUrl": $browser_cdp_url,
+      "color": "#00AA00"
+    }
+  | .tools = (.tools // {})
+  | .tools.alsoAllow = (((.tools.alsoAllow // []) + ["browser"]) | unique)
   | .skills = (.skills // {})
   | .skills.entries = (.skills.entries // {})
   | .skills.entries.discord = (.skills.entries.discord // {})
@@ -276,6 +325,9 @@ mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
 log "Pulling ${IMAGE}"
 docker pull "$IMAGE"
 
+log "Pulling ${BROWSER_IMAGE}"
+docker pull "$BROWSER_IMAGE"
+
 log "Validating config"
 docker run --rm --entrypoint openclaw --user root --hostname "$CONTAINER_NAME" \
   -e "OPENCLAW_PLUGIN_STAGE_DIR=${PLUGIN_STAGE_DIR}" \
@@ -286,8 +338,31 @@ docker run --rm --entrypoint openclaw --user root --hostname "$CONTAINER_NAME" \
   "$IMAGE" \
   config validate
 
-log "Replacing Docker container ${CONTAINER_NAME}"
 mkdir -p "$BACKUP_DIR"
+
+log "Creating Docker network ${BROWSER_NETWORK}"
+if ! docker network inspect "$BROWSER_NETWORK" >/dev/null 2>&1; then
+  docker network create --subnet "$BROWSER_SUBNET" "$BROWSER_NETWORK"
+fi
+
+log "Replacing browser sidecar ${BROWSER_CONTAINER_NAME}"
+if docker inspect "$BROWSER_CONTAINER_NAME" >/dev/null 2>&1; then
+  docker inspect "$BROWSER_CONTAINER_NAME" > "${BACKUP_DIR}/my-${BROWSER_CONTAINER_NAME}.inspect-${stamp}.json" || true
+  docker rm -f "$BROWSER_CONTAINER_NAME"
+fi
+
+docker run -d \
+  --name "$BROWSER_CONTAINER_NAME" \
+  --restart unless-stopped \
+  --network "$BROWSER_NETWORK" \
+  --ip "$BROWSER_IP" \
+  -e "EXTERNAL=${BROWSER_CDP_URL}" \
+  -e "CONCURRENT=2" \
+  -e "QUEUED=5" \
+  -e "TIMEOUT=300000" \
+  "$BROWSER_IMAGE"
+
+log "Replacing Docker container ${CONTAINER_NAME}"
 if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
   docker inspect "$CONTAINER_NAME" > "${BACKUP_DIR}/my-${CONTAINER_NAME}.inspect-${stamp}.json" || true
   docker rm -f "$CONTAINER_NAME"
@@ -313,6 +388,8 @@ docker run -d \
   "$IMAGE" \
   sh -c "mkdir -p /root/.openclaw /home/linuxbrew ${PLUGIN_STAGE_DIR}; exec node dist/index.js gateway --bind lan"
 
+docker network connect "$BROWSER_NETWORK" "$CONTAINER_NAME" >/dev/null 2>&1 || true
+
 log "Waiting for health"
 for i in $(seq 1 36); do
   status="$(docker inspect "$CONTAINER_NAME" --format '{{.State.Status}}' 2>/dev/null || true)"
@@ -326,6 +403,8 @@ done
 
 log "Final status"
 docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+docker ps --filter "name=${BROWSER_CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+docker network inspect "$BROWSER_NETWORK" --format '{{range .Containers}}{{println .Name .IPv4Address}}{{end}}'
 docker inspect "$CONTAINER_NAME" --format '{{range .Mounts}}{{println .Source "->" .Destination}}{{end}}'
 docker stats "$CONTAINER_NAME" --no-stream --format '{{.Name}} CPU={{.CPUPerc}} MEM={{.MemUsage}} PIDS={{.PIDs}}'
 
@@ -339,6 +418,8 @@ Next steps:
      docker exec -it ${CONTAINER_NAME} openclaw models set ${MODEL_REF}
   4. Check:
      docker exec -it ${CONTAINER_NAME} openclaw models status --plain
+  5. Check browser sidecar:
+     docker exec ${CONTAINER_NAME} node -e "fetch('http://${BROWSER_IP}:3000/json/version').then(r=>r.json()).then(j=>console.log(j.Browser, j.webSocketDebuggerUrl))"
 
 If using Cloudflare Tunnel, point it to:
   http://<UNRAID_IP>:${HOST_PORT}

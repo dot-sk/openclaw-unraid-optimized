@@ -15,15 +15,13 @@ Common problems:
 - OpenClaw appdata is mounted through `/mnt/user`, which uses Unraid `shfs`.
 - Plugin dependencies are staged inside appdata.
 - Too many plugins are enabled by default.
-- OpenClaw may wait on external pricing data from LiteLLM or OpenRouter.
 
 This setup makes a few practical changes:
 
 - Uses `/mnt/cache/appdata/openclaw/...` instead of `/mnt/user/...`.
 - Stages plugin runtime files in `/tmp/openclaw-plugin-stage`.
 - Keeps only a small useful plugin set enabled.
-- Uses `openai/gpt-5.5` as the default model.
-- Adds local zero-cost pricing for `openai-codex`, so OpenClaw does not need to fetch pricing data for Codex subscription usage.
+- Uses `openai-codex/gpt-5.5` as the default model.
 
 ## Quick Install
 
@@ -58,7 +56,6 @@ The setup script:
 - creates a minimal `openclaw.json` if one does not exist;
 - applies the optimized plugin list;
 - sets `OPENCLAW_PLUGIN_STAGE_DIR=/tmp/openclaw-plugin-stage`;
-- adds local pricing data for `openai-codex`;
 - runs `openclaw config validate`;
 - recreates the `OpenClaw` Docker container;
 - sets restart policy to `unless-stopped`;
@@ -91,25 +88,23 @@ After the container is running, log in to Codex:
 
 ```bash
 docker exec -it OpenClaw openclaw models auth login --provider openai-codex
-docker exec -it OpenClaw openclaw models set openai/gpt-5.5
+docker exec -it OpenClaw openclaw models set openai-codex/gpt-5.5
 docker exec -it OpenClaw openclaw models status --plain
 ```
 
-Current OpenClaw docs use this model ref:
+Use this model ref:
 
 ```text
-openai/...
+openai-codex/...
 ```
 
-The important part is the auth provider:
+The auth provider is also:
 
 ```text
 openai-codex
 ```
 
-`openai-codex/...` may still work as a legacy alias, but new OpenClaw configs should use `openai/...` after logging in with `openai-codex`.
-
-Do not set up the normal `openai` API-key provider if your goal is to use ChatGPT/Codex subscription access for chat.
+Do not use the normal `openai` API-key provider for the main chat model if your goal is ChatGPT/Codex subscription access.
 
 ## OpenAI API Key
 

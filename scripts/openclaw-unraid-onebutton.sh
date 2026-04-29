@@ -9,7 +9,7 @@ IMAGE="${IMAGE:-ghcr.io/openclaw/openclaw:latest}"
 APPDATA_ROOT="${APPDATA_ROOT:-/mnt/cache/appdata/openclaw}"
 HOST_PORT="${HOST_PORT:-18789}"
 MODEL_ID="${MODEL_ID:-gpt-5.5}"
-MODEL_REF="${MODEL_REF:-openai/${MODEL_ID}}"
+MODEL_REF="${MODEL_REF:-openai-codex/${MODEL_ID}}"
 PLUGIN_STAGE_DIR="${PLUGIN_STAGE_DIR:-/tmp/openclaw-plugin-stage}"
 BACKUP_DIR="${BACKUP_DIR:-/boot/config/plugins/dockerMan/templates-user}"
 
@@ -140,7 +140,6 @@ if [ ! -s "$CONFIG_FILE" ]; then
       "kilocode",
       "kimi",
       "line",
-      "litellm",
       "llm-task",
       "lmstudio",
       "lobster",
@@ -224,37 +223,7 @@ jq --arg model_id "$MODEL_ID" --arg model_ref "$MODEL_REF" '
   | .agents.defaults.memorySearch.model = "text-embedding-3-small"
   | .agents.defaults.memorySearch.enabled = false
   | .models = (.models // {})
-  | .models.providers = (.models.providers // {})
-  | .models.providers.openai = (.models.providers.openai // {})
-  | .models.providers.openai.baseUrl = "https://api.openai.com/v1"
-  | .models.providers.openai.models = (
-      ((.models.providers.openai.models // []) | map(select(.id != $model_id)))
-      + [{
-          "id": $model_id,
-          "name": ("GPT " + $model_id),
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        }]
-    )
-  | .models.providers."openai-codex" = (.models.providers."openai-codex" // {})
-  | .models.providers."openai-codex".baseUrl = "https://chatgpt.com"
-  | .models.providers."openai-codex".models = (
-      ((.models.providers."openai-codex".models // []) | map(select(.id != $model_id)))
-      + [{
-          "id": $model_id,
-          "name": ("GPT Codex " + $model_id),
-          "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
-          }
-        }]
-    )
+  | .models.providers = ((.models.providers // {}) | del(."openai-codex"))
   | .plugins = (.plugins // {})
   | .plugins.entries = (.plugins.entries // {})
   | .plugins.entries."device-pair".enabled = true
@@ -278,7 +247,7 @@ jq --arg model_id "$MODEL_ID" --arg model_ref "$MODEL_REF" '
         "duckduckgo","elevenlabs","exa","fal","feishu","firecrawl","fireworks",
         "github-copilot","google","google-meet","googlechat","gradium","groq",
         "huggingface","imessage","inworld","irc","kilocode","kimi","line",
-        "litellm","llm-task","lmstudio","lobster","matrix","mattermost",
+        "llm-task","lmstudio","lobster","matrix","mattermost",
         "memory-core","memory-lancedb","memory-wiki","microsoft","microsoft-foundry",
         "migrate-claude","migrate-hermes","minimax","mistral","moonshot","msteams",
         "nextcloud-talk","nostr","nvidia","ollama","open-prose","opencode",

@@ -9,30 +9,39 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/openclaw/openclaw</Support>
   <Project>https://github.com/openclaw/openclaw</Project>
-  <Overview>OpenClaw optimized Unraid template.
+  <Overview>OpenClaw optimized for Unraid.
 
-This template intentionally uses /mnt/cache appdata paths instead of /mnt/user to avoid Unraid shfs/FUSE latency for Node, SQLite, and plugin runtime dependency staging.
+Cloudflare Access is the external authentication layer. OpenClaw uses trusted-proxy auth and reads the authenticated user from the Cloudflare Access identity header.
 
-Recommended follow-up: run the companion one-button setup script to apply OpenClaw config optimizations, enable managed browser tools, validate openclaw.json, and disable heavy/default-unused plugins.</Overview>
+Persistent config stays on /mnt/user/appdata/openclaw/config. Heavy runtime data stays on /mnt/cache/appdata/openclaw to avoid Unraid shfs/FUSE latency for Chromium, browser profile, workspace, Homebrew, and plugin dependency staging.
+
+Secrets are Docker environment variables managed by the Unraid UI. They are not stored in openclaw.json. Blank optional provider variables are unset before OpenClaw starts.</Overview>
   <Category>Productivity: Tools:Utilities AI:</Category>
   <WebUI>http://[IP]:[PORT:18789]/</WebUI>
   <TemplateURL/>
   <Icon>https://raw.githubusercontent.com/selfhosters/unRAID-CA-templates/master/templates/img/openclaw.png</Icon>
-  <ExtraParams>--user root --hostname OpenClaw</ExtraParams>
-  <PostArgs>sh -c "mkdir -p /root/.openclaw /home/linuxbrew /tmp/openclaw-plugin-stage; [ -s /root/.openclaw/openclaw.json ] || echo '{\"gateway\":{\"mode\":\"local\",\"bind\":\"lan\",\"controlUi\":{\"allowInsecureAuth\":true},\"auth\":{\"mode\":\"token\"}},\"agents\":{\"defaults\":{\"model\":{\"primary\":\"openai-codex/gpt-5.5\"},\"memorySearch\":{\"provider\":\"openai\",\"model\":\"text-embedding-3-small\",\"enabled\":false}}},\"browser\":{\"enabled\":true,\"defaultProfile\":\"openclaw\",\"headless\":true,\"noSandbox\":true,\"executablePath\":\"/root/.openclaw/ms-playwright/chromium-1217/chrome-linux64/chrome\",\"cdpPortRangeStart\":18800,\"remoteCdpTimeoutMs\":3000,\"remoteCdpHandshakeTimeoutMs\":6000,\"snapshotDefaults\":{\"mode\":\"efficient\"},\"profiles\":{\"openclaw\":{\"cdpPort\":18800,\"color\":\"#00AA00\"}}},\"tools\":{\"alsoAllow\":[\"browser\"]}}' &amp;gt; /root/.openclaw/openclaw.json; exec node dist/index.js gateway --bind lan"</PostArgs>
+  <ExtraParams>--user root --hostname OpenClaw --restart unless-stopped --health-cmd='curl -fsS http://127.0.0.1:18789/healthz >/dev/null' --health-interval=30s --health-timeout=10s --health-start-period=5m --health-retries=10</ExtraParams>
+  <PostArgs>sh -c 'unset OPENCLAW_GATEWAY_TOKEN; for v in OPENAI_API_KEY TELEGRAM_BOT_TOKEN ANTHROPIC_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY COPILOT_GITHUB_TOKEN; do eval "[ -n \"\${$v:-}\" ]" || unset "$v"; done; mkdir -p /root/.openclaw /home/linuxbrew /tmp/openclaw-plugin-stage; exec node dist/index.js gateway --bind lan'</PostArgs>
   <CPUset/>
   <DonateText/>
   <DonateLink/>
   <Requires/>
   <Config Name="Control UI Port" Target="18789" Default="18789" Mode="tcp" Description="Port for Control UI and Gateway API." Type="Port" Display="always" Required="true" Mask="false">18789</Config>
-  <Config Name="Config Path" Target="/root/.openclaw" Default="/mnt/cache/appdata/openclaw/config" Mode="rw" Description="OpenClaw config, credentials, sessions, and runtime state. Use /mnt/cache, not /mnt/user." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/openclaw/config</Config>
-  <Config Name="Workspace Path" Target="/home/node/clawd" Default="/mnt/cache/appdata/openclaw/workspace" Mode="rw" Description="Agent workspace. Use /mnt/cache, not /mnt/user." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/openclaw/workspace</Config>
-  <Config Name="Projects Path" Target="/projects" Default="/mnt/cache/appdata/openclaw/projects" Mode="rw" Description="Optional additional path for coding projects. Use /mnt/cache, not /mnt/user." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/cache/appdata/openclaw/projects</Config>
-  <Config Name="Homebrew Path" Target="/home/linuxbrew/.linuxbrew" Default="/mnt/cache/appdata/openclaw/homebrew" Mode="rw" Description="Persistent storage for optional Homebrew packages. Use /mnt/cache, not /mnt/user." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/cache/appdata/openclaw/homebrew</Config>
-  <Config Name="Gateway Token" Target="OPENCLAW_GATEWAY_TOKEN" Default="" Mode="" Description="Secret token for Control UI authentication. Generate with: openssl rand -hex 24" Type="Variable" Display="always" Required="false" Mask="true"/>
-  <Config Name="OpenAI API Key" Target="OPENAI_API_KEY" Default="" Mode="" Description="Optional. Needed for OpenAI embeddings/API features. Codex subscription auth is configured separately via openai-codex OAuth." Type="Variable" Display="always" Required="false" Mask="true"/>
-  <Config Name="Telegram Bot Token" Target="TELEGRAM_BOT_TOKEN" Default="" Mode="" Description="Optional Telegram bot token from BotFather." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Config Path" Target="/root/.openclaw" Default="/mnt/user/appdata/openclaw/config" Mode="rw" Description="Small persistent OpenClaw config, credentials, identity, and device state. Keep on /mnt/user for durability." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/openclaw/config</Config>
+  <Config Name="Browser Runtime Path" Target="/root/.openclaw/ms-playwright" Default="/mnt/cache/appdata/openclaw/root/ms-playwright" Mode="rw" Description="Chromium and Playwright runtime. Keep on /mnt/cache/btrfs, not shfs." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/cache/appdata/openclaw/root/ms-playwright</Config>
+  <Config Name="Browser Profile Path" Target="/root/.openclaw/browser" Default="/mnt/cache/appdata/openclaw/root/browser" Mode="rw" Description="Persistent managed browser profile and cookies. Keep on /mnt/cache/btrfs for speed." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/cache/appdata/openclaw/root/browser</Config>
+  <Config Name="Workspace Path" Target="/home/node/clawd" Default="/mnt/cache/appdata/openclaw/workspace" Mode="rw" Description="Agent workspace. Keep on /mnt/cache/btrfs." Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/openclaw/workspace</Config>
+  <Config Name="Projects Path" Target="/projects" Default="/mnt/cache/appdata/openclaw/projects" Mode="rw" Description="Optional coding projects mount. Keep on /mnt/cache/btrfs." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/cache/appdata/openclaw/projects</Config>
+  <Config Name="Homebrew Path" Target="/home/linuxbrew/.linuxbrew" Default="/mnt/cache/appdata/openclaw/homebrew" Mode="rw" Description="Persistent Homebrew packages. Keep on /mnt/cache/btrfs." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/cache/appdata/openclaw/homebrew</Config>
+  <Config Name="Plugin Stage Path" Target="/tmp/openclaw-plugin-stage" Default="/mnt/cache/appdata/openclaw/plugin-stage" Mode="rw" Description="OpenClaw plugin dependency staging. Keep on /mnt/cache/btrfs to avoid shfs startup stalls." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/cache/appdata/openclaw/plugin-stage</Config>
+  <Config Name="OpenAI API Key" Target="OPENAI_API_KEY" Default="" Mode="" Description="Optional. Used for embeddings/API features. Codex subscription auth is configured separately via openai-codex OAuth." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Telegram Bot Token" Target="TELEGRAM_BOT_TOKEN" Default="" Mode="" Description="Optional Telegram bot token from BotFather." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Anthropic API Key" Target="ANTHROPIC_API_KEY" Default="" Mode="" Description="Optional Anthropic API key." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="Gemini API Key" Target="GEMINI_API_KEY" Default="" Mode="" Description="Optional Google Gemini API key." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="OpenRouter API Key" Target="OPENROUTER_API_KEY" Default="" Mode="" Description="Optional OpenRouter API key." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="GitHub Copilot Token" Target="COPILOT_GITHUB_TOKEN" Default="" Mode="" Description="Optional GitHub Copilot OAuth token." Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
   <Config Name="Gateway Port" Target="OPENCLAW_GATEWAY_PORT" Default="18789" Mode="" Description="Internal gateway port. Keep in sync with Control UI Port." Type="Variable" Display="advanced" Required="false" Mask="false">18789</Config>
-  <Config Name="Plugin Stage Dir" Target="OPENCLAW_PLUGIN_STAGE_DIR" Default="/tmp/openclaw-plugin-stage" Mode="" Description="Writable non-shfs directory for bundled plugin runtime dependencies. Required to avoid Unraid shfs/FUSE startup hangs." Type="Variable" Display="advanced" Required="false" Mask="false">/tmp/openclaw-plugin-stage</Config>
+  <Config Name="Plugin Stage Dir" Target="OPENCLAW_PLUGIN_STAGE_DIR" Default="/tmp/openclaw-plugin-stage" Mode="" Description="Container path for plugin dependency staging. Must match Plugin Stage Path target." Type="Variable" Display="advanced" Required="false" Mask="false">/tmp/openclaw-plugin-stage</Config>
+  <Config Name="Timezone" Target="TZ" Default="Asia/Yerevan" Mode="" Description="Timezone for OpenClaw logs. Must be a valid IANA timezone." Type="Variable" Display="advanced" Required="false" Mask="false">Asia/Yerevan</Config>
   <Config Name="PATH" Target="PATH" Default="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" Mode="" Description="System PATH including optional Homebrew." Type="Variable" Display="advanced" Required="false" Mask="false">/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin</Config>
 </Container>
